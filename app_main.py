@@ -1,6 +1,7 @@
 
+
 # app_main.py - Minimal FastAPI backend that talks to Supabase
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
 import os, datetime as dt
@@ -151,7 +152,7 @@ async def crear_baja(
     fecha_inicio: str = Form(...),    # YYYY-MM-DD
     fecha_fin: Optional[str] = Form(None),
     descripcion: str = Form(""),
-    files: List[UploadFile] | None = None
+    files: List[UploadFile] = File(None)   # <- para subir 0..n archivos
 ):
     urls = []
     if files:
@@ -159,10 +160,11 @@ async def crear_baja(
         for f in files:
             content = await f.read()
             path = f"bajas/{user_id}/{dt.datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{f.filename}"
-            up = supabase.storage.from_(bucket).upload(path, content, file_options={"content-type": f.content_type})
+            up = supabase.storage.from_(bucket).upload(
+                path, content, file_options={"content-type": f.content_type}
+            )
             if isinstance(up, dict) and up.get("error"):
                 raise HTTPException(400, up["error"]["message"])
-            # get public URL (adjust if you keep bucket private and sign URLs instead)
             public_url = supabase.storage.from_(bucket).get_public_url(path)
             urls.append(public_url)
 
@@ -177,6 +179,26 @@ async def crear_baja(
         "estado": "Notificada",
     }
     res = supabase.table("bajas").insert(data).execute()
+    if res.data is None:
+        raise HTTPException(400, str(res.error) if res.error else "Insert error")
+    return res.data[0]
+
+@app.get("/bajas")
+def listar_bajas(
+    user_id: str = Query(...),
+    limit: int = 100
+):
+    res = (
+        supabase.table("bajas")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("fecha_inicio", desc=True)   # Ajusta si prefieres otro campo
+        .limit(limit)
+        .execute()
+    )
+    if res.data is None:
+        raise HTTPException(400, str(res.error) if res.error else "Query error")
+    return res.data
     if res.data is None:
         raise HTTPException(400, str(res.error) if res.error else "Insert error")
     return res.data[0]
